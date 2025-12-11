@@ -1,0 +1,30 @@
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# Data files
+oil_level_log.csv
+
+# Ignore everything inside the images directory
+images/*
+# But re-include the images directory itself
+!images/
+
+# Generated files
+processed_for_cropping.jpg
+gauge_cropped_preview.jpg
