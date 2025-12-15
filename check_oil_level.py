@@ -4,6 +4,7 @@ Check oil level by grabbing a snapshot from UniFi Protect camera
 and analyzing it with Claude.
 """
 
+import argparse
 import base64
 import csv
 import os
@@ -38,10 +39,29 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USERNAME = os.getenv("SMTP_USERNAME", "jgoulah@gmail.com")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 
-# Paths
-IMAGES_DIR = Path(__file__).parent / "images"
-IMAGES_DIR.mkdir(exist_ok=True)
-LOG_FILE = Path(__file__).parent / "oil_level_log.csv"
+# Parse command line arguments
+def parse_args():
+    parser = argparse.ArgumentParser(description="Check oil level from camera")
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=None,
+        help="Directory for images and log file (default: ./images and ./oil_level_log.csv)",
+    )
+    return parser.parse_args()
+
+_args = parse_args()
+
+# Paths - use --data-dir if provided, otherwise local paths
+if _args.data_dir:
+    DATA_DIR = Path(_args.data_dir)
+    IMAGES_DIR = DATA_DIR / "images"
+    LOG_FILE = DATA_DIR / "oil_level_log.csv"
+else:
+    IMAGES_DIR = Path(__file__).parent / "images"
+    LOG_FILE = Path(__file__).parent / "oil_level_log.csv"
+
+IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 
 # Disable SSL warnings for local UniFi
 import urllib3
@@ -163,46 +183,95 @@ def log_reading(percentage, raw_result, snapshot_path):
     print(f"📝 Logged reading to {LOG_FILE}")
 
 
-def send_alert_email(percentage, snapshot_path):
-    """Send email alert when oil level is low with inline image."""
-    subject = f"⚠️ Low Oil Alert: {percentage}% Remaining"
+def send_alert_email(percentage, snapshot_path, is_warning=False):
+    """Send email with oil level status. Warning style when below threshold."""
+    if is_warning:
+        subject = f"⚠️ LOW OIL WARNING: {percentage}% Remaining ⚠️"
+        status_text = "LOW - ACTION REQUIRED"
+        status_color = "#dc3545"
+        header_bg = "#dc3545"
+        message = "<strong>Your oil tank is running low! Please schedule an oil delivery soon.</strong>"
+        banner = """
+<div style="background-color: #dc3545; color: white; padding: 15px; text-align: center; font-size: 18px; font-weight: bold;">
+⚠️ LOW OIL WARNING - ACTION REQUIRED ⚠️
+</div>
+"""
+    else:
+        subject = f"📊 Oil Level Status: {percentage}%"
+        status_text = "OK"
+        status_color = "#28a745"
+        header_bg = "#007bff"
+        message = "Your oil level is within normal range."
+        banner = ""
 
     # HTML body with inline image
     html_body = f"""
 <html>
-<body>
-<h2>Oil Level Alert</h2>
-<p><strong>Your oil tank is running low!</strong></p>
+<body style="font-family: Arial, sans-serif;">
+{banner}
+<div style="padding: 20px;">
+<h2 style="color: {header_bg};">Oil Level {'Alert' if is_warning else 'Report'}</h2>
+<p>{message}</p>
 
 <table style="border-collapse: collapse; margin: 20px 0;">
-<tr><td style="padding: 5px;"><strong>Current Level:</strong></td><td style="padding: 5px;">{percentage}%</td></tr>
-<tr><td style="padding: 5px;"><strong>Alert Threshold:</strong></td><td style="padding: 5px;">{ALERT_THRESHOLD}%</td></tr>
-<tr><td style="padding: 5px;"><strong>Time:</strong></td><td style="padding: 5px;">{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</td></tr>
+<tr>
+    <td style="padding: 10px; border: 1px solid #ddd;"><strong>Current Level:</strong></td>
+    <td style="padding: 10px; border: 1px solid #ddd; font-size: 18px; font-weight: bold; color: {status_color};">{percentage}%</td>
+</tr>
+<tr>
+    <td style="padding: 10px; border: 1px solid #ddd;"><strong>Status:</strong></td>
+    <td style="padding: 10px; border: 1px solid #ddd; color: {status_color}; font-weight: bold;">{status_text}</td>
+</tr>
+<tr>
+    <td style="padding: 10px; border: 1px solid #ddd;"><strong>Alert Threshold:</strong></td>
+    <td style="padding: 10px; border: 1px solid #ddd;">{ALERT_THRESHOLD}%</td>
+</tr>
+<tr>
+    <td style="padding: 10px; border: 1px solid #ddd;"><strong>Time:</strong></td>
+    <td style="padding: 10px; border: 1px solid #ddd;">{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</td>
+</tr>
 </table>
 
 <p><strong>Gauge Reading:</strong></p>
 <img src="cid:gauge_image" style="max-width: 600px; border: 2px solid #ccc;">
 
-<p>Please schedule an oil delivery soon.</p>
-
-<hr>
+<hr style="margin-top: 30px;">
 <p style="font-size: 12px; color: #666;">This is an automated message from your oil level monitoring system.</p>
+</div>
 </body>
 </html>
 """
 
     # Plain text alternative
-    text_body = f"""
-Oil Level Alert
-===============
+    if is_warning:
+        text_body = f"""
+****************************************
+⚠️  LOW OIL WARNING - ACTION REQUIRED  ⚠️
+****************************************
 
 Your oil tank is running low!
 
 Current Level: {percentage}%
+Status: LOW - ACTION REQUIRED
 Alert Threshold: {ALERT_THRESHOLD}%
 Time: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
 Please schedule an oil delivery soon.
+
+---
+This is an automated message from your oil level monitoring system.
+"""
+    else:
+        text_body = f"""
+Oil Level Status Report
+=======================
+
+Your oil level is within normal range.
+
+Current Level: {percentage}%
+Status: OK
+Alert Threshold: {ALERT_THRESHOLD}%
+Time: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
 ---
 This is an automated message from your oil level monitoring system.
@@ -243,11 +312,12 @@ This is an automated message from your oil level monitoring system.
                 server.login(SMTP_USERNAME, SMTP_PASSWORD)
             server.send_message(msg)
 
-        print(f"📧 Alert email sent to {ALERT_EMAIL}")
+        email_type = "warning" if is_warning else "status"
+        print(f"📧 {email_type.capitalize()} email sent to {ALERT_EMAIL}")
         return True
 
     except Exception as e:
-        print(f"❌ Failed to send alert email: {e}")
+        print(f"❌ Failed to send email: {e}")
         return False
 
 
@@ -415,15 +485,16 @@ def main():
         log_reading(percentage, result, str(snapshot_filename))
 
         # Check if alert needed
-        if percentage <= ALERT_THRESHOLD:
+        is_warning = percentage <= ALERT_THRESHOLD
+        if is_warning:
             print(
                 f"\n⚠️  WARNING: Oil level ({percentage}%) is at or below threshold ({ALERT_THRESHOLD}%)"
             )
-            send_alert_email(
-                percentage, processed_path
-            )  # Send processed image instead of raw
         else:
             print(f"\n✓ Oil level OK ({percentage}% > {ALERT_THRESHOLD}% threshold)")
+
+        # Always send email, with warning flag when below threshold
+        send_alert_email(percentage, processed_path, is_warning=is_warning)
     else:
         print("\n⚠️  Could not parse percentage from result")
 

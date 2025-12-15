@@ -1,0 +1,10 @@
+services:
+  oil-notifier:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      # Persist images and logs
+      - ./images:/app/images
+      - ./oil_level_log.csv:/app/oil_level_log.csv
+    restart: "no"  # Run once per invocation (for cron)
