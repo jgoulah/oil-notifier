@@ -6,10 +6,8 @@ REMOTE_DATA_DIR := /usr/local/etc/oil-notifier
 
 .PHONY: install-remote run build clean
 
-# Install/update on remote (idempotent - safe to run multiple times)
+# Install/update on remote
 install-remote:
-	@echo "Setting up directories on $(REMOTE_HOST)..."
-	ssh -t $(REMOTE_HOST) "sudo mkdir -p $(REMOTE_APP_DIR) $(REMOTE_DATA_DIR)/images && sudo chown -R \$$(whoami) $(REMOTE_APP_DIR) $(REMOTE_DATA_DIR)"
 	@echo "Syncing to $(REMOTE_HOST):$(REMOTE_APP_DIR)..."
 	rsync -av --delete \
 		--exclude='.venv' \
