@@ -378,46 +378,41 @@ def analyze_oil_gauge(image_data):
                 },
                 {
                     "type": "text",
-                    "text": """This is a close-up view of a vertical oil tank float gauge tube with markings for EMPTY (bottom), 1/4, 1/2, 3/4, and FULL.
+                    "text": """This is a vertical oil tank float gauge. Your task is to determine the oil level percentage.
 
-IMPORTANT: The "FULL" marking is NOT at the very top of the physical tube - it's a labeled line about 1cm below the top of the tube. When reading positions, use the FULL marker line as 100%, not the top of the tube itself.
+GAUGE STRUCTURE:
+- Clear tube with labeled markers: FULL (top), 3/4, 1/2, 1/4, EMPTY (bottom)
+- A FLOAT (thick disc, ~4-5mm) moves up/down inside the tube
+- The float appears as a THICK HORIZONTAL BAND when viewed from the side
+- IGNORE vertical lines - those are reflections, not the float
 
-HOW THIS GAUGE WORKS:
-- The clear tube does NOT fill with oil
-- A FLOAT (a round disc like a thick coin, about 5-10mm thick) moves up and down INSIDE the tube
-- From this side view, the round float appears as a THICK HORIZONTAL BAND (like viewing a coin edge-on)
-- The float position indicates the oil level in the tank
+STEP 1 - Locate the markers:
+Look at the gauge and identify where each labeled marker (FULL, 3/4, 1/2, 1/4, EMPTY) appears vertically. The markers are evenly spaced.
 
-WHAT TO LOOK FOR:
-- A THICK **HORIZONTAL** BAND inside the tube (the float is ~5-10mm thick and runs ACROSS the tube horizontally)
-- The float appears SLIGHTLY LIGHTER in color than the dark marker lines
-- Thin marker lines are only ~1mm thick, dark, and evenly spaced at EMPTY, 1/4, 1/2, 3/4, FULL
-- The FLOAT BAND is 5-10x THICKER than the thin marker lines
-- The float is a solid object inside the tube, NOT a reflection or shadow
+STEP 2 - Find the float:
+The float is a THICK horizontal band (thicker than the thin marker lines). It may appear slightly lighter than the dark markings. Find the highest thick horizontal band in the tube.
 
-CRITICAL: 
-- The float is HORIZONTAL (goes across the tube left-to-right)
-- IGNORE any VERTICAL lines or reflections (these are just light reflections, not the float)
-- Look at the ENTIRE tube from top to bottom
-- If you see multiple HORIZONTAL bands, the HIGHEST one is likely the float
+STEP 3 - Calculate percentage:
+Determine which two markers the float is between, then estimate its position:
+- EXACTLY at EMPTY marker = 0%
+- EXACTLY at 1/4 marker = 25%
+- EXACTLY at 1/2 marker = 50%
+- EXACTLY at 3/4 marker = 75%
+- EXACTLY at FULL marker = 100%
 
-READING THE GAUGE:
-- Float AT or just below the "FULL" marker line = ~95-100%
-- Float near top of tube but above FULL line = ~100%+ (overfilled, use FULL line as reference)
-- Between 3/4 and FULL = 75-95%  
-- At 3/4 mark = ~75%
-- Between 1/2 and 3/4 = 50-75%
-- At 1/2 mark = ~50%
-- Between 1/4 and 1/2 = 25-50%
-- Near EMPTY = 0-10%
+IMPORTANT: If the float is AT or NEAR a marker line (within 1-2mm), report that marker's exact value.
 
-Remember: FULL marker line = 100%, not the physical top of the tube
+For positions clearly BETWEEN markers, interpolate linearly:
+- Halfway between 1/2 and 3/4 = 62-63%
+- 1/4 of the way from 3/4 toward FULL = 81%
+- 1/4 of the way from 3/4 toward 1/2 = 69%
 
-Identify ALL thick horizontal bands you see, then report the position of the HIGHEST one.
+Be precise. Do not round up generously - if it looks like it's at 3/4, report 75%.
 
-Provide:
+RESPOND WITH:
+Float position: [describe exactly where you see the float relative to the nearest markers]
+Calculation: [show your work - which markers is it between, and how far between them]
 Percentage: X%
-Position: [vertical location of the HIGHEST thick band]
 Confidence: [High/Medium/Low]""",
                 },
             ],
