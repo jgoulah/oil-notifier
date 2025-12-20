@@ -34,10 +34,7 @@ install-remote:
 	@echo "Syncing .env to $(REMOTE_HOST):$(REMOTE_APP_DIR)..."
 	rsync -av .env $(REMOTE_HOST):$(REMOTE_APP_DIR)/.env
 	ssh $(REMOTE_HOST) "touch $(REMOTE_DATA_DIR)/oil_level_log.csv"
-	@echo ""
-	@echo "Done! Next steps on $(REMOTE_HOST):"
-	@echo "  1. Test: cd $(REMOTE_APP_DIR) && docker compose up --build"
-	@echo "  2. Set up cron for scheduled runs"
+	@echo "Done"
 
 # Local development commands
 run:
