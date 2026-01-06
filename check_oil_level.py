@@ -96,10 +96,42 @@ def get_camera_snapshot():
         return None
 
 
+def reduce_glare(img):
+    """Reduce glare/reflections in the image, especially in the upper portion."""
+    import numpy as np
+
+    # Convert to numpy array
+    img_array = np.array(img, dtype=np.float32)
+
+    # Identify very bright pixels (potential glare) - threshold at 220 out of 255
+    bright_mask = np.mean(img_array, axis=2) > 220
+
+    # Reduce brightness of glare pixels
+    glare_reduction = 0.7  # Reduce bright pixels to 70% of original
+    for c in range(3):
+        img_array[:, :, c] = np.where(
+            bright_mask, img_array[:, :, c] * glare_reduction, img_array[:, :, c]
+        )
+
+    # Apply gradient darkening to top 40% of image (where reflections tend to occur)
+    height = img_array.shape[0]
+    top_portion = int(height * 0.4)
+
+    for y in range(top_portion):
+        # Gradual darkening: more at top, less toward middle
+        darken_factor = 0.85 + (0.15 * y / top_portion)  # 0.85 at top, 1.0 at 40%
+        img_array[y, :, :] *= darken_factor
+
+    # Clip values to valid range
+    img_array = np.clip(img_array, 0, 255).astype(np.uint8)
+
+    return Image.fromarray(img_array)
+
+
 def process_image(
-    image_data, flip_horizontal=False, rotate_degrees=0, crop_box=None, enhance=True
+    image_data, flip_horizontal=False, rotate_degrees=0, crop_box=None, enhance=True, reduce_glare_enabled=True
 ):
-    """Process image: flip, rotate, crop, and enhance as needed."""
+    """Process image: flip, rotate, crop, reduce glare, and enhance as needed."""
     from PIL import ImageEnhance
 
     # Load image from bytes
@@ -124,6 +156,10 @@ def process_image(
     # Crop if crop_box provided (left, upper, right, lower)
     if crop_box:
         img = img.crop(crop_box)
+
+    # Reduce glare/reflections (especially important for IR camera images)
+    if reduce_glare_enabled:
+        img = reduce_glare(img)
 
     # Enhance brightness and contrast to make the gauge easier to read
     if enhance:
@@ -333,8 +369,9 @@ def analyze_oil_gauge(image_data):
     # Note: Camera now outputs correct orientation, no flip needed
     # Rotate counterclockwise (+55)
     # Don't enhance - it adds noise
+    # Reduce glare to help distinguish float from reflections
     # Crop coordinates (left, top, right, bottom) on the rotated image to focus on gauge only
-    print("🔄 Processing image (rotating and cropping to gauge area)...")
+    print("🔄 Processing image (rotating, cropping, and reducing glare)...")
     crop_box = (700, 650, 1300, 1600)  # Updated crop for new camera orientation
     processed_image_data = process_image(
         image_data,
@@ -342,6 +379,7 @@ def analyze_oil_gauge(image_data):
         rotate_degrees=55,  # Counterclockwise rotation
         crop_box=crop_box,
         enhance=False,
+        reduce_glare_enabled=True,  # Reduce reflections that confuse float detection
     )
 
     # Save processed image for email/debugging (resize by 50% for email)
@@ -384,34 +422,40 @@ GAUGE STRUCTURE:
 - Clear tube with labeled markers: FULL (top), 3/4, 1/2, 1/4, EMPTY (bottom)
 - A FLOAT (thick disc, ~4-5mm) moves up/down inside the tube
 - The float appears as a THICK HORIZONTAL BAND when viewed from the side
-- IGNORE vertical lines - those are reflections, not the float
 
-STEP 1 - Locate the markers:
-Look at the gauge and identify where each labeled marker (FULL, 3/4, 1/2, 1/4, EMPTY) appears vertically. The markers are evenly spaced.
+CRITICAL - IDENTIFYING THE REAL FLOAT VS REFLECTIONS:
+⚠️ This infrared camera image has BRIGHT REFLECTIONS that look like horizontal bands, especially NEAR THE TOP of the gauge (between 3/4 and FULL).
+⚠️ DO NOT mistake these reflections for the float!
 
-STEP 2 - Find the float:
-The float is a THICK horizontal band (thicker than the thin marker lines). It may appear slightly lighter than the dark markings. Find the highest thick horizontal band in the tube.
+How to distinguish the REAL FLOAT from reflections:
+1. The real float is a SOLID, UNIFORM thickness horizontal band (~4-5mm thick)
+2. The real float has CLEAR DEFINED EDGES (top and bottom edges are sharp)
+3. Reflections appear as BRIGHT GLARE, often with fuzzy/uneven edges or varying brightness
+4. Reflections often appear near the TOP of the gauge due to lighting angle
+5. The float is typically DARKER or more SOLID than bright glare spots
 
-STEP 3 - Calculate percentage:
-Determine which two markers the float is between, then estimate its position:
+STEP 1 - Scan the ENTIRE gauge from bottom to top:
+Look at the full length of the tube. Identify ALL horizontal bands you see, noting their position and characteristics.
+
+STEP 2 - Eliminate reflections:
+Any bright, glary, or fuzzy horizontal features near the top (FULL to 3/4 region) are likely reflections. The real float will be a solid, well-defined band.
+
+STEP 3 - Find the real float:
+The float is the solid, uniform-thickness horizontal band with clear edges. It may be anywhere from EMPTY to FULL. Do NOT assume it's near the top just because you see brightness there.
+
+STEP 4 - Calculate percentage:
 - EXACTLY at EMPTY marker = 0%
 - EXACTLY at 1/4 marker = 25%
 - EXACTLY at 1/2 marker = 50%
 - EXACTLY at 3/4 marker = 75%
 - EXACTLY at FULL marker = 100%
 
-IMPORTANT: If the float is AT or NEAR a marker line (within 1-2mm), report that marker's exact value.
-
-For positions clearly BETWEEN markers, interpolate linearly:
-- Halfway between 1/2 and 3/4 = 62-63%
-- 1/4 of the way from 3/4 toward FULL = 81%
-- 1/4 of the way from 3/4 toward 1/2 = 69%
-
-Be precise. Do not round up generously - if it looks like it's at 3/4, report 75%.
+For positions between markers, interpolate linearly.
 
 RESPOND WITH:
-Float position: [describe exactly where you see the float relative to the nearest markers]
-Calculation: [show your work - which markers is it between, and how far between them]
+Observations: [List ALL horizontal bands/features you see, from bottom to top, noting which appear to be reflections vs the real float]
+Float position: [describe exactly where the REAL float is, after eliminating reflections]
+Calculation: [show your work]
 Percentage: X%
 Confidence: [High/Medium/Low]""",
                 },
