@@ -9,6 +9,7 @@ __pycache__/
 .venv/
 venv/
 ENV/
+.serena/
 
 # Jupyter
 .ipynb_checkpoints/

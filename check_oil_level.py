@@ -75,17 +75,26 @@ def get_camera_snapshot():
 
     if not all([UNIFI_HOST, UNIFI_API_KEY, CAMERA_ID]):
         print("❌ Missing UniFi configuration")
+        print(f"   UNIFI_HOST: {'set' if UNIFI_HOST else 'MISSING'}")
+        print(f"   UNIFI_API_KEY: {'set' if UNIFI_API_KEY else 'MISSING'}")
+        print(f"   CAMERA_ID: {'set' if CAMERA_ID else 'MISSING'}")
         return None
 
     snapshot_url = f"https://{UNIFI_HOST}/proxy/protect/integration/v1/cameras/{CAMERA_ID}/snapshot"
+    print(f"   URL: {snapshot_url}")
 
-    headers = {"X-API-KEY": UNIFI_API_KEY, "Accept": "application/json"}
+    headers = {"X-API-KEY": UNIFI_API_KEY, "Accept": "*/*"}
 
     try:
         response = requests.get(snapshot_url, headers=headers, verify=False, timeout=10)
 
         if response.status_code != 200:
             print(f"❌ Failed to get snapshot: {response.status_code}")
+            print(f"   Response headers: {dict(response.headers)}")
+            try:
+                print(f"   Response body: {response.text[:500]}")
+            except:
+                print(f"   Response body: (could not decode)")
             return None
 
         print("✓ Snapshot retrieved successfully")
@@ -93,6 +102,8 @@ def get_camera_snapshot():
 
     except Exception as e:
         print(f"❌ Error fetching snapshot: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 

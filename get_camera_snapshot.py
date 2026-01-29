@@ -37,7 +37,7 @@ def get_unifi_snapshot(output_filename="camera_snapshot.jpg"):
         # Using the integration API v1 endpoint
         snapshot_url = f"https://{UNIFI_HOST}/proxy/protect/integration/v1/cameras/{CAMERA_ID}/snapshot"
 
-        headers = {"X-API-KEY": UNIFI_API_KEY, "Accept": "application/json"}
+        headers = {"X-API-KEY": UNIFI_API_KEY, "Accept": "*/*"}
 
         print(f"Fetching snapshot from camera {CAMERA_ID}...")
         response = requests.get(

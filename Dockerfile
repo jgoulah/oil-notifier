@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY check_oil_level.py .
 COPY list_cameras.py .
 COPY get_camera_snapshot.py .
+COPY debug_network.py .
 
 # Create directories for data
 RUN mkdir -p /app/images
