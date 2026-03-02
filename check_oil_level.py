@@ -114,23 +114,24 @@ def reduce_glare(img):
     # Convert to numpy array
     img_array = np.array(img, dtype=np.float32)
 
-    # Identify very bright pixels (potential glare) - threshold at 220 out of 255
-    bright_mask = np.mean(img_array, axis=2) > 220
+    # Identify very bright pixels (potential glare) - lower threshold to catch more glare
+    brightness = np.mean(img_array, axis=2)
+    bright_mask = brightness > 210
 
-    # Reduce brightness of glare pixels
-    glare_reduction = 0.7  # Reduce bright pixels to 70% of original
+    # Reduce brightness of glare pixels moderately
+    glare_reduction = 0.55  # Reduce bright pixels to 55% of original (was 70%)
     for c in range(3):
         img_array[:, :, c] = np.where(
             bright_mask, img_array[:, :, c] * glare_reduction, img_array[:, :, c]
         )
 
-    # Apply gradient darkening to top 40% of image (where reflections tend to occur)
+    # Apply gradient darkening to top 45% of image (where IR tube reflection occurs)
     height = img_array.shape[0]
-    top_portion = int(height * 0.4)
+    top_portion = int(height * 0.45)
 
     for y in range(top_portion):
-        # Gradual darkening: more at top, less toward middle
-        darken_factor = 0.85 + (0.15 * y / top_portion)  # 0.85 at top, 1.0 at 40%
+        # Moderate darkening: 0.75 at top, 1.0 at 45% mark
+        darken_factor = 0.75 + (0.25 * y / top_portion)
         img_array[y, :, :] *= darken_factor
 
     # Clip values to valid range
@@ -196,7 +197,7 @@ def parse_percentage(result_text):
     """Extract percentage from Claude's response. Returns upper end of range if given."""
     # Look for patterns like "30-35%" or "Percentage: 35%" or just "35%"
     patterns = [
-        r"Percentage:\s*(\d+)(?:-(\d+))?%",  # "Percentage: 30-35%" or "Percentage: 35%"
+        r"\*{0,2}Percentage\*{0,2}:?\s*\*{0,2}\s*(\d+)(?:-(\d+))?%",  # "Percentage: 35%" or "**Percentage**: 35%"
         r"(\d+)(?:-(\d+))%",  # "30-35%" or "35%"
     ]
 
@@ -427,45 +428,48 @@ def analyze_oil_gauge(image_data):
                 },
                 {
                     "type": "text",
-                    "text": """This is a vertical oil tank float gauge. Your task is to determine the oil level percentage.
+                    "text": """This is a vertical oil tank float gauge captured by an infrared (IR) camera. Your task is to determine the oil level percentage.
 
 GAUGE STRUCTURE:
 - Clear tube with labeled markers: FULL (top), 3/4, 1/2, 1/4, EMPTY (bottom)
 - A FLOAT (thick disc, ~4-5mm) moves up/down inside the tube
 - The float appears as a THICK HORIZONTAL BAND when viewed from the side
 
-CRITICAL - IDENTIFYING THE REAL FLOAT VS REFLECTIONS:
-⚠️ This infrared camera image has BRIGHT REFLECTIONS that look like horizontal bands, especially NEAR THE TOP of the gauge (between 3/4 and FULL).
-⚠️ DO NOT mistake these reflections for the float!
+KNOWN IR CAMERA ARTIFACTS — IGNORE THESE COMPLETELY:
+⚠️ ARTIFACT 1 — BRIGHT VERTICAL CENTER STREAK: The IR camera reflects off the glass tube creating a BRIGHT WHITE VERTICAL LINE running down the center of the gauge tube. This is NOT the float. It is a fixed optical artifact present in every image.
+⚠️ ARTIFACT 2 — UPPER REGION GLOW: The IR lighting causes the upper portion of the gauge (between 3/4 and FULL) to appear brighter/glowing. This does NOT mean the float is there.
+⚠️ ANY bright, white, or glowing feature is almost certainly a reflection artifact. The real float is NOT bright.
 
-How to distinguish the REAL FLOAT from reflections:
-1. The real float is a SOLID, UNIFORM thickness horizontal band (~4-5mm thick)
-2. The real float has CLEAR DEFINED EDGES (top and bottom edges are sharp)
-3. Reflections appear as BRIGHT GLARE, often with fuzzy/uneven edges or varying brightness
-4. Reflections often appear near the TOP of the gauge due to lighting angle
-5. The float is typically DARKER or more SOLID than bright glare spots
+HOW TO FIND THE REAL FLOAT:
+1. The real float is a DARK or GRAY solid horizontal band (~4-5mm thick) — it is DARKER than its surroundings, not brighter
+2. It has SHARP, WELL-DEFINED top and bottom edges
+3. Look in the LOWER HALF of the gauge first (between EMPTY and 1/2) — that is the most likely region
+4. Do NOT report bright/white features as the float
 
-STEP 1 - Scan the ENTIRE gauge from bottom to top:
-Look at the full length of the tube. Identify ALL horizontal bands you see, noting their position and characteristics.
+STEP 1 - Locate the text labels as anchors:
+Find and note the vertical pixel positions of the text labels: FULL, 3/4, 1/2, 1/4, EMPTY. These labels are your ground truth reference points.
 
-STEP 2 - Eliminate reflections:
-Any bright, glary, or fuzzy horizontal features near the top (FULL to 3/4 region) are likely reflections. The real float will be a solid, well-defined band.
+STEP 2 - Scan the ENTIRE gauge from BOTTOM to TOP, ignoring bright/white features:
+Look for a dark, solid horizontal band. Note every candidate and its position relative to the labels you found in Step 1.
 
-STEP 3 - Find the real float:
-The float is the solid, uniform-thickness horizontal band with clear edges. It may be anywhere from EMPTY to FULL. Do NOT assume it's near the top just because you see brightness there.
+STEP 3 - Eliminate reflections:
+Discard any feature that is bright, white, glowing, or fuzzy. Only consider dark, SOLID bands with SHARP edges.
 
-STEP 4 - Calculate percentage:
+STEP 4 - Identify the real float:
+The darkest, most solid horizontal band with defined edges is the float. Express its position relative to the text label anchors from Step 1.
+
+STEP 5 - Calculate percentage:
 - EXACTLY at EMPTY marker = 0%
 - EXACTLY at 1/4 marker = 25%
 - EXACTLY at 1/2 marker = 50%
 - EXACTLY at 3/4 marker = 75%
 - EXACTLY at FULL marker = 100%
 
-For positions between markers, interpolate linearly.
+SNAPPING RULE: If the float appears to be touching, straddling, or within roughly 1/8 of the inter-marker spacing from a labeled marker, report that marker's exact value. The float disc has physical thickness — its center being slightly above a line still means the level IS at that line.
 
 RESPOND WITH:
-Observations: [List ALL horizontal bands/features you see, from bottom to top, noting which appear to be reflections vs the real float]
-Float position: [describe exactly where the REAL float is, after eliminating reflections]
+Observations: [List what you see from bottom to top — specifically note whether each feature is bright/reflective (artifact) or dark/solid (potential float)]
+Float position: [where is the dark solid band you identified as the real float]
 Calculation: [show your work]
 Percentage: X%
 Confidence: [High/Medium/Low]""",
