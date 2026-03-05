@@ -114,24 +114,25 @@ def reduce_glare(img):
     # Convert to numpy array
     img_array = np.array(img, dtype=np.float32)
 
-    # Identify very bright pixels (potential glare) - lower threshold to catch more glare
+    # Identify very bright pixels (potential glare) - crush the glare blobs
     brightness = np.mean(img_array, axis=2)
     bright_mask = brightness > 210
 
-    # Reduce brightness of glare pixels moderately
-    glare_reduction = 0.55  # Reduce bright pixels to 55% of original (was 70%)
+    # Reduce brightness of glare pixels
+    glare_reduction = 0.55
     for c in range(3):
         img_array[:, :, c] = np.where(
             bright_mask, img_array[:, :, c] * glare_reduction, img_array[:, :, c]
         )
 
-    # Apply gradient darkening to top 45% of image (where IR tube reflection occurs)
+    # Apply gradient darkening to top 30% of image only
+    # Keep this limited so the float region (which can be anywhere) stays readable
     height = img_array.shape[0]
-    top_portion = int(height * 0.45)
+    top_portion = int(height * 0.30)
 
     for y in range(top_portion):
-        # Moderate darkening: 0.75 at top, 1.0 at 45% mark
-        darken_factor = 0.75 + (0.25 * y / top_portion)
+        # Moderate darkening: 0.70 at top, 1.0 at 30% mark
+        darken_factor = 0.70 + (0.30 * y / top_portion)
         img_array[y, :, :] *= darken_factor
 
     # Clip values to valid range
@@ -141,10 +142,10 @@ def reduce_glare(img):
 
 
 def process_image(
-    image_data, flip_horizontal=False, rotate_degrees=0, crop_box=None, enhance=True, reduce_glare_enabled=True
+    image_data, flip_horizontal=False, rotate_degrees=0, crop_box=None, enhance=True, reduce_glare_enabled=True, equalize=True
 ):
     """Process image: flip, rotate, crop, reduce glare, and enhance as needed."""
-    from PIL import ImageEnhance
+    from PIL import ImageEnhance, ImageOps
 
     # Load image from bytes
     img = Image.open(BytesIO(image_data))
@@ -172,6 +173,11 @@ def process_image(
     # Reduce glare/reflections (especially important for IR camera images)
     if reduce_glare_enabled:
         img = reduce_glare(img)
+
+    # Apply histogram equalization to spread the dynamic range and reveal
+    # detail hidden in dark or bright regions (e.g. float inside glare zone)
+    if equalize:
+        img = ImageOps.equalize(img)
 
     # Enhance brightness and contrast to make the gauge easier to read
     if enhance:
@@ -369,30 +375,42 @@ This is an automated message from your oil level monitoring system.
         return False
 
 
-def analyze_oil_gauge(image_data):
-    """Send image to Claude for analysis."""
+def analyze_oil_gauge(image_data, skip_processing=False):
+    """Send image to Claude for analysis.
+
+    Args:
+        image_data: Raw image bytes (camera snapshot or pre-processed image).
+        skip_processing: If True, skip rotation/crop/glare-reduction and send the
+                         image directly to Claude. Use when the image is already a
+                         processed/cropped gauge shot (e.g. a saved processed_ file).
+    """
     print("🤖 Analyzing oil gauge with Claude...")
 
     if not ANTHROPIC_API_KEY:
         print("❌ Missing ANTHROPIC_API_KEY")
         return None, None, None
 
-    # Process image: rotate and crop to isolate just the gauge
-    # Note: Camera now outputs correct orientation, no flip needed
-    # Rotate counterclockwise (+55)
-    # Don't enhance - it adds noise
-    # Reduce glare to help distinguish float from reflections
-    # Crop coordinates (left, top, right, bottom) on the rotated image to focus on gauge only
-    print("🔄 Processing image (rotating, cropping, and reducing glare)...")
-    crop_box = (700, 650, 1300, 1600)  # Updated crop for new camera orientation
-    processed_image_data = process_image(
-        image_data,
-        flip_horizontal=False,  # Camera is now set to correct orientation
-        rotate_degrees=55,  # Counterclockwise rotation
-        crop_box=crop_box,
-        enhance=False,
-        reduce_glare_enabled=True,  # Reduce reflections that confuse float detection
-    )
+    if skip_processing:
+        print("⏭️  Skipping image processing (using image as-is)...")
+        processed_image_data = image_data
+    else:
+        # Process image: rotate and crop to isolate just the gauge
+        # Note: Camera now outputs correct orientation, no flip needed
+        # Rotate counterclockwise (+55)
+        # Don't enhance - it adds noise
+        # Reduce glare to help distinguish float from reflections
+        # Crop coordinates (left, top, right, bottom) on the rotated image to focus on gauge only
+        print("🔄 Processing image (rotating, cropping, and reducing glare)...")
+        crop_box = (700, 650, 1300, 1600)  # Updated crop for new camera orientation
+        processed_image_data = process_image(
+            image_data,
+            flip_horizontal=False,  # Camera is now set to correct orientation
+            rotate_degrees=55,  # Counterclockwise rotation
+            crop_box=crop_box,
+            enhance=False,
+            reduce_glare_enabled=True,  # Reduce reflections that confuse float detection
+            equalize=True,  # Spread dynamic range to reveal float detail in glare zones
+        )
 
     # Save processed image for email/debugging (resize by 50% for email)
     processed_filename = (
@@ -435,28 +453,43 @@ GAUGE STRUCTURE:
 - A FLOAT (thick disc, ~4-5mm) moves up/down inside the tube
 - The float appears as a THICK HORIZONTAL BAND when viewed from the side
 
-KNOWN IR CAMERA ARTIFACTS — IGNORE THESE COMPLETELY:
-⚠️ ARTIFACT 1 — BRIGHT VERTICAL CENTER STREAK: The IR camera reflects off the glass tube creating a BRIGHT WHITE VERTICAL LINE running down the center of the gauge tube. This is NOT the float. It is a fixed optical artifact present in every image.
-⚠️ ARTIFACT 2 — UPPER REGION GLOW: The IR lighting causes the upper portion of the gauge (between 3/4 and FULL) to appear brighter/glowing. This does NOT mean the float is there.
-⚠️ ANY bright, white, or glowing feature is almost certainly a reflection artifact. The real float is NOT bright.
+KNOWN IR CAMERA ARTIFACTS:
+⚠️ ARTIFACT 1 — BRIGHT VERTICAL CENTER STREAK: The IR camera creates a BRIGHT WHITE VERTICAL LINE running down the center of the gauge tube. This is NOT the float. It is a fixed optical artifact.
+⚠️ ARTIFACT 2 — LARGE CENTRAL GLARE BLOB: The IR lighting creates a VERY LARGE bright/white region that can span 50%+ of the gauge height. The float disc is often EMBEDDED WITHIN this glare region in the center. The float is NOT visible as a dark band in the center when glare is heavy.
 
-HOW TO FIND THE REAL FLOAT:
-1. The real float is a DARK or GRAY solid horizontal band (~4-5mm thick) — it is DARKER than its surroundings, not brighter
-2. It has SHARP, WELL-DEFINED top and bottom edges
-3. Look in the LOWER HALF of the gauge first (between EMPTY and 1/2) — that is the most likely region
-4. Do NOT report bright/white features as the float
+⚠️ ARTIFACT 3 — EXTERNAL MOUNTING HARDWARE: There are metal clamps/brackets that attach the gauge to the pipe, visible on the OUTSIDE of the glass tube. These create dark horizontal shadows at fixed positions (commonly near the bottom of the gauge). These are EXTERNAL and are NOT the float. The float is INSIDE the tube.
+
+THE KEY TECHNIQUE — LOOK AT THE TUBE WALLS, NOT THE CENTER:
+The float is a solid disc that spans the full width of the tube. Even when the center of the tube is completely obscured by IR glare, the EDGES of the float disc are visible where they intersect the LEFT and RIGHT walls of the tube. These appear as:
+- A small, sharp horizontal dark notch or shadow on the LEFT wall of the tube
+- A matching small, sharp horizontal dark notch or shadow on the RIGHT wall of the tube
+- Both at the SAME vertical height — this is the float level
+
+The float disc can be ANYWHERE in the gauge — at any percentage from 0-100. Do NOT assume it is in the lower half.
 
 STEP 1 - Locate the text labels as anchors:
-Find and note the vertical pixel positions of the text labels: FULL, 3/4, 1/2, 1/4, EMPTY. These labels are your ground truth reference points.
+Find the vertical positions of: FULL (top), 3/4, 1/2, 1/4, EMPTY (bottom). These are your reference points.
 
-STEP 2 - Scan the ENTIRE gauge from BOTTOM to TOP, ignoring bright/white features:
-Look for a dark, solid horizontal band. Note every candidate and its position relative to the labels you found in Step 1.
+STEP 2 - Assess the glare blob extent:
+Note the TOP and BOTTOM edges of the large central glare blob. Record which gauge labels (FULL, 3/4, 1/2, 1/4) each boundary is nearest to.
 
-STEP 3 - Eliminate reflections:
-Discard any feature that is bright, white, glowing, or fuzzy. Only consider dark, SOLID bands with SHARP edges.
+CRITICAL RULE — LARGE GLARE SCENARIO: The float disc causes IR glare that extends both above and below its actual position. When the glare blob spans a large portion of the gauge (top edge near FULL, bottom edge at or above 1/2), the float is located at approximately the MIDPOINT (center) of the glare blob — halfway between its top and bottom boundaries. For example, if the glare extends from FULL to 1/2, the center is 75% = 3/4 level.
+
+STEP 3 - Examine the LEFT and RIGHT tube walls:
+Scan BOTH side walls for matching horizontal features. Features BELOW the glare blob bottom edge are likely external mounting hardware — ignore them. Only consider features WITHIN or AT the edges of the glare blob.
 
 STEP 4 - Identify the real float:
-The darkest, most solid horizontal band with defined edges is the float. Express its position relative to the text label anchors from Step 1.
+- If glare blob spans top-to-1/2 or larger: float ≈ center of the glare blob.
+- If glare blob is small (only near top 20%): find the dark horizontal band just below the glare.
+- If visible on tube walls within the glare: that confirms the float position.
+Express the float position relative to the text label anchors.
+
+STEP 5 - Calculate percentage:
+- EXACTLY at EMPTY marker = 0%
+- EXACTLY at 1/4 marker = 25%
+- EXACTLY at 1/2 marker = 50%
+- EXACTLY at 3/4 marker = 75%
+- EXACTLY at FULL marker = 100%
 
 STEP 5 - Calculate percentage:
 - EXACTLY at EMPTY marker = 0%

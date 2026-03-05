@@ -116,6 +116,22 @@ ALERT_EMAIL = "your-email@example.com"
 - `test/` - Test and diagnostic scripts
 - `.env` - Configuration (not in git)
 
+## Testing
+
+Use `test/test_saved_image.py` to run the analysis pipeline against a saved image without needing a live camera. Run from the project root with the virtualenv active (or use `.venv/bin/python3`):
+
+```bash
+source .venv/bin/activate
+
+# Test with a raw camera snapshot (full pipeline: rotate, crop, glare reduction, equalization)
+python3 test/test_saved_image.py images/oil_snapshot_20240101_080000.jpg
+
+# Test with an already-processed image (e.g. a saved processed_ or emailed image — skips rotation/crop)
+python3 test/test_saved_image.py images/gauge-at-75.jpg --skip-processing
+```
+
+The script prints Claude's full reasoning and the parsed percentage, and saves the processed image to `images/processed_<timestamp>.jpg` for inspection.
+
 ## Troubleshooting
 
 ### Email Not Sending
